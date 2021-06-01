@@ -2,27 +2,18 @@ package com.github.dynamobee.dao;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.Arrays;
-import java.util.Date;
+import java.util.*;
 
+import com.github.dynamobee.exception.DynamobeeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.amazonaws.services.dynamodbv2.document.DynamoDB;
-import com.amazonaws.services.dynamodbv2.document.Expected;
-import com.amazonaws.services.dynamodbv2.document.Item;
-import com.amazonaws.services.dynamodbv2.document.Table;
-import com.amazonaws.services.dynamodbv2.model.AttributeDefinition;
-import com.amazonaws.services.dynamodbv2.model.ConditionalCheckFailedException;
-import com.amazonaws.services.dynamodbv2.model.KeySchemaElement;
-import com.amazonaws.services.dynamodbv2.model.KeyType;
-import com.amazonaws.services.dynamodbv2.model.ProvisionedThroughput;
-import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
-import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType;
 import com.github.dynamobee.changeset.ChangeEntry;
 import com.github.dynamobee.exception.DynamobeeConfigurationException;
 import com.github.dynamobee.exception.DynamobeeConnectionException;
 import com.github.dynamobee.exception.DynamobeeLockException;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.*;
 
 
 public class DynamobeeDao {
@@ -30,9 +21,9 @@ public class DynamobeeDao {
 
 	private static final String VALUE_LOCK = "LOCK";
 
-	private DynamoDB dynamoDB;
+	private DynamoDbClient dynamoDbClient;
 	private String dynamobeeTableName;
-	private Table dynamobeeTable;
+	private TableDescription dynamobeeTable;
 	private boolean waitForLock;
 	private long changeLogLockWaitTime;
 	private long changeLogLockPollRate;
@@ -47,32 +38,20 @@ public class DynamobeeDao {
 		this.throwExceptionIfCannotObtainLock = throwExceptionIfCannotObtainLock;
 	}
 
-	public void connectDynamoDB(DynamoDB dynamoDB) throws DynamobeeConfigurationException {
-		this.dynamoDB = dynamoDB;
-		this.dynamobeeTable = findOrCreateDynamoBeeTable();
+	public void connectDynamoDB(DynamoDbClient dynamoDB) throws DynamobeeException {
+		this.dynamoDbClient = dynamoDB;
+		this.dynamobeeTable = findDynamoBeeTable();
 	}
 
-	private Table findOrCreateDynamoBeeTable() {
+	private TableDescription findDynamoBeeTable() throws DynamobeeException {
 		logger.info("Searching for an existing DynamoBee table; please wait...");
 		try {
-			Table table = dynamoDB.getTable(dynamobeeTableName);
-			table.describe();
+			TableDescription tableDescription = dynamoDbClient.describeTable(DescribeTableRequest.builder().tableName(dynamobeeTableName).build()).table()
 			logger.info("DynamoBee table found");
-			return table;
+			return tableDescription;
 
 		} catch (ResourceNotFoundException e) {
-			logger.info("Attempting to create DynamoBee table; please wait...");
-			Table table = dynamoDB.createTable(dynamobeeTableName,
-					Arrays.asList(new KeySchemaElement(ChangeEntry.KEY_CHANGEID, KeyType.HASH)),
-					Arrays.asList(new AttributeDefinition(ChangeEntry.KEY_CHANGEID, ScalarAttributeType.S)),
-					new ProvisionedThroughput(1L, 1L));
-			try {
-				table.waitForActive();
-			} catch (InterruptedException ex) {
-				//ok
-			}
-			System.out.println("Success. DynamoBee Table status: " + table.getDescription().getTableStatus());
-			return table;
+			throw new DynamobeeException("Could not find the specified migrations table!");
 		}
 	}
 
@@ -110,16 +89,22 @@ public class DynamobeeDao {
 	}
 
 	public boolean acquireLock() {
-
 		// acquire lock by attempting to insert the same value in the collection - if it already exists (i.e. lock held)
 		// there will be an exception
 		try {
-			Item item = new Item()
-					.withPrimaryKey(ChangeEntry.KEY_CHANGEID, VALUE_LOCK)
-					.withLong(ChangeEntry.KEY_TIMESTAMP, new Date().getTime())
-					.withString(ChangeEntry.KEY_AUTHOR, getHostName());
+			HashMap<String, AttributeValue> item = new HashMap();
+			item.put(ChangeEntry.KEY_CHANGEID, AttributeValue.builder().s(VALUE_LOCK).build());
+			item.put(ChangeEntry.KEY_TIMESTAMP, AttributeValue.builder().n(Long.toString(new Date().getTime())).build());
+			item.put(ChangeEntry.KEY_AUTHOR, AttributeValue.builder().s(getHostName()).build());
 
-			this.dynamobeeTable.putItem(item, new Expected(ChangeEntry.KEY_CHANGEID).notExist());
+			PutItemRequest request = PutItemRequest
+          .builder()
+          .item(item)
+          .conditionExpression("attribute_not_exists(" + ChangeEntry.KEY_CHANGEID + ")")
+          .tableName(dynamobeeTableName)
+          .build();
+
+			this.dynamoDbClient.putItem(request);
 		} catch (ConditionalCheckFailedException ex) {
 			logger.warn("The lock has been already acquired.");
 			return false;
@@ -136,11 +121,29 @@ public class DynamobeeDao {
 	}
 
 	public void releaseProcessLock() throws DynamobeeConnectionException {
-		this.dynamobeeTable.deleteItem(ChangeEntry.KEY_CHANGEID, VALUE_LOCK);
+	  Map<String, AttributeValue> deleteKey = new HashMap();
+	  deleteKey.put(ChangeEntry.KEY_CHANGEID, AttributeValue.builder().s(VALUE_LOCK).build());
+
+		this.dynamoDbClient.deleteItem(
+		    DeleteItemRequest
+            .builder()
+            .tableName(dynamobeeTableName)
+            .key(deleteKey)
+            .build());
 	}
 
 	public boolean isProccessLockHeld() throws DynamobeeConnectionException {
-		return this.dynamobeeTable.getItem(ChangeEntry.KEY_CHANGEID, VALUE_LOCK) != null;
+    Map<String, AttributeValue> getKey = new HashMap();
+    getKey.put(ChangeEntry.KEY_CHANGEID, AttributeValue.builder().s(VALUE_LOCK).build());
+
+		return this.dynamoDbClient.getItem(
+		    GetItemRequest
+            .builder()
+            .tableName(dynamobeeTableName)
+            .key(getKey)
+            .consistentRead(true)
+            .build()
+    ).hasItem();
 	}
 
 	public boolean isNewChange(ChangeEntry changeEntry) throws DynamobeeConnectionException {
