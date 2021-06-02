@@ -1,9 +1,12 @@
 package com.github.dynamobee.changeset;
 
 import java.util.Date;
+import java.util.HashMap;
 
 import com.amazonaws.services.dynamodbv2.document.Item;
 import com.amazonaws.services.dynamodbv2.document.spec.QuerySpec;
+import org.w3c.dom.Attr;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 
 /**
@@ -31,13 +34,14 @@ public class ChangeEntry {
 		this.changeSetMethodName = changeSetMethodName;
 	}
 
-	public Item buildFullDBObject() {
-		return new Item()
-				.withPrimaryKey(KEY_CHANGEID, this.changeId)
-				.with(KEY_AUTHOR, this.author)
-				.with(KEY_TIMESTAMP, this.timestamp.getTime())
-				.with(KEY_CHANGELOGCLASS, this.changeLogClass)
-				.with(KEY_CHANGESETMETHOD, this.changeSetMethodName);
+	public HashMap<String, AttributeValue> buildFullDBObject() {
+    HashMap<String, AttributeValue> item = new HashMap();
+    item.put(KEY_CHANGEID, AttributeValue.builder().s(this.changeId).build());
+    item.put(KEY_AUTHOR, AttributeValue.builder().s(this.author).build());
+    item.put(KEY_TIMESTAMP, AttributeValue.builder().s(Long.toString(this.timestamp.getTime())).build());
+    item.put(KEY_CHANGELOGCLASS, AttributeValue.builder().s(this.changeLogClass).build());
+		item.put(KEY_CHANGESETMETHOD, AttributeValue.builder().s(this.changeSetMethodName).build());
+		return item;
 	}
 
 	public QuerySpec buildSearchQuerySpec() {

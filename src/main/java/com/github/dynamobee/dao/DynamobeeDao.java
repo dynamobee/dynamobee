@@ -28,6 +28,7 @@ public class DynamobeeDao {
 	private long changeLogLockWaitTime;
 	private long changeLogLockPollRate;
 	private boolean throwExceptionIfCannotObtainLock;
+	private String partitionKey;
 
 	public DynamobeeDao(String dynamobeeTableName, boolean waitForLock, long changeLogLockWaitTime,
 			long changeLogLockPollRate, boolean throwExceptionIfCannotObtainLock) {
@@ -38,6 +39,16 @@ public class DynamobeeDao {
 		this.throwExceptionIfCannotObtainLock = throwExceptionIfCannotObtainLock;
 	}
 
+  public DynamobeeDao(String dynamobeeTableName, boolean waitForLock, long changeLogLockWaitTime,
+                      long changeLogLockPollRate, boolean throwExceptionIfCannotObtainLock, String partitionKey) {
+    this.dynamobeeTableName = dynamobeeTableName;
+    this.waitForLock = waitForLock;
+    this.changeLogLockWaitTime = changeLogLockWaitTime;
+    this.changeLogLockPollRate = changeLogLockPollRate;
+    this.throwExceptionIfCannotObtainLock = throwExceptionIfCannotObtainLock;
+    this.partitionKey = partitionKey;
+  }
+
 	public void connectDynamoDB(DynamoDbClient dynamoDB) throws DynamobeeException {
 		this.dynamoDbClient = dynamoDB;
 		this.dynamobeeTable = findDynamoBeeTable();
@@ -46,7 +57,7 @@ public class DynamobeeDao {
 	private TableDescription findDynamoBeeTable() throws DynamobeeException {
 		logger.info("Searching for an existing DynamoBee table; please wait...");
 		try {
-			TableDescription tableDescription = dynamoDbClient.describeTable(DescribeTableRequest.builder().tableName(dynamobeeTableName).build()).table()
+			TableDescription tableDescription = dynamoDbClient.describeTable(DescribeTableRequest.builder().tableName(dynamobeeTableName).build()).table();
 			logger.info("DynamoBee table found");
 			return tableDescription;
 
@@ -147,11 +158,27 @@ public class DynamobeeDao {
 	}
 
 	public boolean isNewChange(ChangeEntry changeEntry) throws DynamobeeConnectionException {
-		return this.dynamobeeTable.getItem(ChangeEntry.KEY_CHANGEID, changeEntry.getChangeId()) == null;
+    Map<String, AttributeValue> getKey = new HashMap();
+    getKey.put(ChangeEntry.KEY_CHANGEID, AttributeValue.builder().s(changeEntry.getChangeId()).build());
+
+    return !this.dynamoDbClient.getItem(
+        GetItemRequest
+            .builder()
+            .tableName(dynamobeeTableName)
+            .key(getKey)
+            .consistentRead(true)
+            .build()
+    ).hasItem();
 	}
 
 	public void save(ChangeEntry changeEntry) throws DynamobeeConnectionException {
-		this.dynamobeeTable.putItem(changeEntry.buildFullDBObject());
+    PutItemRequest request = PutItemRequest
+        .builder()
+        .item(changeEntry.buildFullDBObject())
+        .conditionExpression("attribute_not_exists(" + ChangeEntry.KEY_CHANGEID + ")")
+        .tableName(dynamobeeTableName)
+        .build();
+    this.dynamoDbClient.putItem(request);
 	}
 
 	public void setChangelogTableName(String changelogCollectionName) {
