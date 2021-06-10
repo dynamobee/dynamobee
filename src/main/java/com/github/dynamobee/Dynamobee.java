@@ -20,6 +20,7 @@ import org.springframework.core.env.Environment;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.stream.Stream;
 
 
 /**
@@ -177,83 +178,33 @@ public class Dynamobee implements InitializingBean {
 
 	private Object executeChangeSetMethod(Method changeSetMethod, Object changeLogInstance, DynamoDB db)
 			throws IllegalAccessException, InvocationTargetException, DynamobeeChangeSetException {
-		if (changeSetMethod.getParameterTypes().length == 1
-				&& changeSetMethod.getParameterTypes()[0].equals(DynamoDB.class)) {
-			logger.debug("method with DynamoDB argument");
 
-			return changeSetMethod.invoke(changeLogInstance, db);
+	  if(changeSetMethod.getParameterTypes().length == 0) {
+      return changeSetMethod.invoke(changeLogInstance);
+    }
 
-		} else if (changeSetMethod.getParameterTypes().length == 1
-				&& changeSetMethod.getParameterTypes()[0].equals(AmazonDynamoDB.class)) {
-			logger.debug("method with AmazonDynamoDB argument");
+    Object[] args = Stream.of(changeSetMethod.getParameterTypes()).map(parameterType -> {
+      if (parameterType.equals(DynamoDB.class)) {
+        logger.debug("method with DynamoDB argument");
+        return db;
+      } else if (parameterType.equals(AmazonDynamoDB.class)) {
+        logger.debug("method with AmazonDynamoDB argument");
+        return amazonDynamoDB;
+      } else if (parameterType.equals(DynamoDBTemplate.class)) {
+        logger.debug("method with DynamoDBTemplate argument");
+        return dynamoDBTemplate;
+      } else if (parameterType.equals(DynamoDBMapper.class)) {
+        logger.debug("method with DynamoDBMapper");
+        return dynamoDBMapper;
+      } else if (parameterType.equals(Environment.class)) {
+        logger.debug("method with Environment");
+        return springEnvironment;
+      } else {
+        return null;
+      }
+    }).toArray();
 
-			return changeSetMethod.invoke(changeLogInstance, amazonDynamoDB);
-
-		} else if (changeSetMethod.getParameterTypes().length == 1
-				&& changeSetMethod.getParameterTypes()[0].equals(DynamoDBTemplate.class)) {
-			logger.debug("method with DynamoDBTemplate argument");
-
-			return changeSetMethod.invoke(changeLogInstance,
-					dynamoDBTemplate != null ? dynamoDBTemplate : new DynamoDBTemplate(amazonDynamoDB, this.dynamoDBMapper, this.dynamoDBMapperConfig));
-
-		} else if (changeSetMethod.getParameterTypes().length == 2
-				&& changeSetMethod.getParameterTypes()[0].equals(DynamoDBTemplate.class)
-				&& changeSetMethod.getParameterTypes()[1].equals(Environment.class)) {
-			logger.debug("method with DynamoDBTemplate and Environment arguments");
-
-			return changeSetMethod.invoke(changeLogInstance,
-					dynamoDBTemplate != null ? dynamoDBTemplate : new DynamoDBTemplate(amazonDynamoDB, this.dynamoDBMapper, this.dynamoDBMapperConfig),
-					springEnvironment);
-
-		} else if (changeSetMethod.getParameterTypes().length == 2
-				&& changeSetMethod.getParameterTypes()[0].equals(DynamoDBMapper.class)
-				&& changeSetMethod.getParameterTypes()[1].equals(AmazonDynamoDB.class)) {
-			logger.debug("method with DynamoDBMapper and AmazonDynamoDB arguments");
-
-			return changeSetMethod.invoke(changeLogInstance, dynamoDBMapper != null ? dynamoDBMapper : new DynamoDBTemplate(amazonDynamoDB, this.dynamoDBMapper, this.dynamoDBMapperConfig),
-					amazonDynamoDB);
-
-		} else if (changeSetMethod.getParameterTypes().length == 2
-				&& changeSetMethod.getParameterTypes()[0].equals(AmazonDynamoDB.class)
-				&& changeSetMethod.getParameterTypes()[1].equals(DynamoDBMapper.class)) {
-
-			logger.debug("method with AmazonDynamoDB and DynamoDBMapper arguments");
-
-			return changeSetMethod.invoke(changeLogInstance, amazonDynamoDB,
-					dynamoDBMapper != null ? dynamoDBMapper : new DynamoDBMapper(amazonDynamoDB));
-
-		} else if (changeSetMethod.getParameterTypes().length == 2
-				&& changeSetMethod.getParameterTypes()[0].equals(DynamoDBTemplate.class)
-				&& changeSetMethod.getParameterTypes()[1].equals(AmazonDynamoDB.class)) {
-			logger.debug("method with DynamoDBTemplate and AmazonDynamoDB arguments");
-
-			return changeSetMethod.invoke(changeLogInstance, dynamoDBTemplate != null ? dynamoDBTemplate : new DynamoDBTemplate(amazonDynamoDB, this.dynamoDBMapper, this.dynamoDBMapperConfig),
-					amazonDynamoDB);
-
-		} else if (changeSetMethod.getParameterTypes().length == 2
-				&& changeSetMethod.getParameterTypes()[0].equals(AmazonDynamoDB.class)
-				&& changeSetMethod.getParameterTypes()[1].equals(DynamoDBTemplate.class)) {
-			logger.debug("method with AmazonDynamoDB and DynamoDBTemplate arguments");
-
-			return changeSetMethod.invoke(changeLogInstance, amazonDynamoDB,
-					dynamoDBTemplate != null ? dynamoDBTemplate : new DynamoDBTemplate(amazonDynamoDB, this.dynamoDBMapper, this.dynamoDBMapperConfig));
-
-		} else if (changeSetMethod.getParameterTypes().length == 2
-				&& changeSetMethod.getParameterTypes()[0].equals(AmazonDynamoDB.class)
-				&& changeSetMethod.getParameterTypes()[1].equals(Environment.class)) {
-			logger.debug("method with AmazonDynamoDB and Environment arguments");
-
-			return changeSetMethod.invoke(changeLogInstance, amazonDynamoDB, springEnvironment);
-
-		} else if (changeSetMethod.getParameterTypes().length == 0) {
-			logger.debug("method with no params");
-
-			return changeSetMethod.invoke(changeLogInstance);
-
-		} else {
-			throw new DynamobeeChangeSetException("ChangeSet method " + changeSetMethod.getName() +
-					" has wrong arguments list. Please see docs for more info!");
-		}
+	  return changeSetMethod.invoke(changeLogInstance, args);
 	}
 
 	private void validateConfig() throws DynamobeeConfigurationException {

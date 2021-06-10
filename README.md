@@ -109,7 +109,15 @@ Method annotated by @ChangeSet is taken and applied to the database. History of 
 `runAlways` - _[optional, default: false]_ changeset will always be executed but only first execution event will be stored in dbchangelog collection
 
 ##### Defining ChangeSet methods
-Method annotated by `@ChangeSet` can have one of the following definition:
+Method annotated by `@ChangeSet` can have one of the following resolved parameters:
+
+- com.amazonaws.services.dynamodbv2.document.DynamoDB
+- com.amazonaws.services.dynamodbv2.AmazonDynamoDB
+- com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBMapper  
+- org.socialsignin.spring.data.dynamodb.core.DynamoDBTemplate
+- org.springframework.core.env.Environment
+
+Examples :
 
 ```java
 @ChangeSet(order = "001", id = "someChangeWithoutArgs", author = "testAuthor")
